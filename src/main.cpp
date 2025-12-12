@@ -39,7 +39,7 @@ int maxLight = 0;
 
 Adafruit_CAP1188 cap = Adafruit_CAP1188();
 
-// For remembering latest readings (for telemetry)
+
 int     lastLdrValue      = 0;
 uint8_t lastTouchCount    = 0;
 float energyBaseline_s = 0.0f;   // "full-brightness seconds"
@@ -50,19 +50,15 @@ uint32_t lastEnergyUpdate = 0;
 // Wi-Fi + Azure IoT config
 // =======================
 
-// ⚠️ For real use, avoid UCInet Mobile Access (captive portal).
-// Use a hotspot or normal WPA2 Wi-Fi if possible.
 #define WIFI_SSID     "UCInet Mobile Access"
 #define WIFI_PASSWORD ""
 
 // Azure IoT Hub configuration
 #define SAS_TOKEN "SharedAccessSignature sr=cs147-hub-10.azure-devices.net%2Fdevices%2Fcs147_project&sig=WXH2LPjvNS6ZBKqyHrobw0upIiRJyEvnwOKdWQ8bYsg%3D&se=1765519499"
 
-// (You can keep root_ca if you want proper TLS later, but we'll ignore it for now)
-// const char* root_ca = "-----BEGIN CERTIFICATE-----\n...";
 
-String iothubName = "cs147-hub-10";      // Your hub name
-String deviceName = "cs147_project";     // Your device name
+String iothubName = "cs147-hub-10";   
+String deviceName = "cs147_project";  
 String url = "https://" + iothubName +
              ".azure-devices.net/devices/" +
              deviceName +
@@ -101,11 +97,9 @@ void setup()
   ledcAttachPin(LED_PIN, LEDC_CH);
   ledcWrite(LEDC_CH, 0);
 
-  // I2C for CAP1188 + DHT20
   Serial.println("Initializing I2C...");
   Wire.begin(SDA_PIN, SCL_PIN);
 
-  // CAP1188 init
   Serial.println("CAP1188 test!");
   if (!cap.begin()) {
     Serial.println("CAP1188 not found");
@@ -127,7 +121,7 @@ void setup()
   Serial.println("Calibration started: expose to bright and dark areas");
 
   unsigned long t0 = millis();
-  while (millis() - t0 < 10000) {  // 10 seconds
+  while (millis() - t0 < 10000) {
     int v = analogRead(LDR_PIN);
 
     if (v < minLight) minLight = v;
@@ -147,7 +141,6 @@ void setup()
   Serial.print("Max: ");
   Serial.println(maxLight);
 
-  // DHT20 init
   int dhtStatus = dht.begin();
   if (dhtStatus != 0) {
     Serial.print("DHT20 init failed, status = ");
@@ -188,7 +181,7 @@ void loop()
 {
   uint32_t now = millis(); 
   // -----------------------------
-  // 1) Touch sensor (CAP1188)
+  // 1) Touch sensor
   // -----------------------------
   uint8_t touched = cap.touched();
   uint8_t count   = popcount8(touched);
@@ -227,21 +220,20 @@ void loop()
   // 2.5) Energy savings accounting
   // -----------------------------
   float dt = (now - lastEnergyUpdate) / 1000.0f;  // seconds since last update
-  if (dt < 0) dt = 0;  // safety
+  if (dt < 0) dt = 0; 
   lastEnergyUpdate = now;
 
   if (ledEnabled) {
-    // Baseline: LED would have been full brightness during dt
+    // Baseline
     float baseline = dt;
 
-    // Actual: scaled by duty (0–4095)
+    // Actual light brightness
     float actual   = dt * ((float)duty / 4095.0f);
 
     energyBaseline_s += baseline;
     energyActual_s   += actual;
   }
 
-  // Debug prints for local behavior
   Serial.print("touchCount="); Serial.print(count);
   Serial.print("  LDR="); Serial.print(v);
   Serial.print("  duty="); Serial.print(duty);
@@ -250,16 +242,12 @@ void loop()
   // -----------------------------
   // 3) Telemetry to Azure (every TELEMETRY_INTERVAL ms)
   // -----------------------------
-  // uint32_t now = millis();
   if (now - lastTelemetryTime >= TELEMETRY_INTERVAL) {
 
-    // Read DHT20 before sending
     int status = dht.read();
     if (status != 0) {
       Serial.print("DHT20 read error, status = ");
       Serial.println(status);
-      // For debugging you can still send dummy values if you want
-      // but here we'll skip send
       lastTelemetryTime = now;
       return;
     }
@@ -284,13 +272,12 @@ void loop()
   doc["temperature"] = temperature;
   doc["humidity"]    = humidity;
   doc["ldr"]         = lastLdrValue;
-  // doc["touchCount"]  = lastTouchCount;
   doc["ledEnabled"]  = ledEnabled;
 
   // Energy metrics
   float energySaved_s = energyBaseline_s - energyActual_s;
-  doc["energy_baseline_s"] = energyBaseline_s;   // seconds at full brightness
-  doc["energy_actual_s"]   = energyActual_s;     // seconds at actual brightness
+  doc["energy_baseline_s"] = energyBaseline_s;   // full brightness
+  doc["energy_actual_s"]   = energyActual_s;     // actual brightness
   doc["energy_saved_s"]    = energySaved_s;      // baseline - actual
   if (energyBaseline_s > 0.0f) {
     doc["energy_saved_pct"] = 100.0f * energySaved_s / energyBaseline_s;
@@ -300,10 +287,7 @@ void loop()
     char buffer[256];
     serializeJson(doc, buffer, sizeof(buffer));
 
-    // Send telemetry via HTTPS
     WiFiClientSecure client;
-    // For debugging: ignore certificate validation.
-    // Later you can replace this with setCACert(root_ca) and proper time.
     client.setInsecure();
 
     HTTPClient http;
@@ -328,5 +312,5 @@ void loop()
     lastTelemetryTime = now;
   }
 
-  delay(100);  // keep main loop responsive but not too fast
+  delay(100);
 }
